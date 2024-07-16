@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+import sys
+import argparse 
+from base64 import b64decode
+from urllib.parse import urlparse, parse_qs 
+import gzip
+import bz2
+import lzma
+import zipfile
+import io
+import magic 
+
+def identify_file_format_from_binary(binary_data):
+    mime = magic.Magic(mime=True)
+    file_type = mime.from_buffer(binary_data)
+    return file_type
+
+def process_data(binary_data, mime_type):
+    if mime_type == 'application/gzip':
+        with gzip.GzipFile(fileobj=io.BytesIO(binary_data)) as f:
+            return f.read()
+    elif mime_type == 'application/x-bzip2':
+        return bz2.decompress(binary_data)
+    elif mime_type == 'application/x-xz':
+        return lzma.decompress(binary_data)
+    elif mime_type == 'application/zip':
+        with zipfile.ZipFile(io.BytesIO(binary_data)) as z:
+            file_names = z.namelist()
+            return z.read(file_names[0])
+    else:
+        return binary_data
+
+
+def decode_text(binary_data):
+    #if the data is known mime type process it 
+    mime_type = identify_file_format_from_binary(binary_data)
+    binary_data = process_data(binary_data,mime_type)
+    encodings = ['utf-8', 'latin1', 'utf-16', 'utf-32', 'ascii']
+    ret = "<Unknown encoding!>"
+    for encoding in encodings:
+        try:
+            ret = binary_data.decode(encoding)
+            break
+        except (UnicodeDecodeError, LookupError):
+            continue 
+    return (ret,mime_type,encoding)
+    
+
+def binary_to_hex_with_spaces(binary_data):
+    hex_string = binary_data.hex()
+    spaced_hex = ' '.join(hex_string[i:i+2] for i in range(0, len(hex_string), 2))
+    return spaced_hex
+
+def decode_url_parameter(url,parameter): 
+    url_parsed = urlparse(url) 
+    url_qs = parse_qs(url_parsed.query)
+    value = f"<{parameter} not found>"
+    mime_type, encoding, hex = "","","" 
+    if parameter in url_qs: 
+        data = b64decode(url_qs[parameter][0])
+        hex = binary_to_hex_with_spaces(data)
+        value,mime_type,encoding = decode_text(b64decode(url_qs[parameter][0]))
+    return (value,mime_type,encoding,hex)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="takes a URLs and base64 decodes a given parameter")
+    parser.add_argument("parameter",help="The query string paramater to decode")
+    parser.add_argument('--infile','-f', nargs='?', type=argparse.FileType('r'),
+                    default=sys.stdin, help="the input file with one url per line default stdin")
+    parser.add_argument('--outfile','-o', nargs='?', type=argparse.FileType('w'),
+                    default=sys.stdout, help='the output file with one decoded paramter per line default stdout')
+    args = parser.parse_args()
+    with args.outfile as o:
+        with args.infile as f:
+            for line in f: 
+                value,format,encoding,hex = decode_url_parameter(line,args.parameter)
+                o.write(f"{hex}\t{value}\t{format}\t{encoding}\n")
