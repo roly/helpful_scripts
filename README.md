@@ -11,4 +11,4 @@ the output is the hex for what is decoded, the string value if possible, the mim
 
 we try decoding with utf8 first then , latin1, utf-16, utf-32 and finally ascii 
 
-
+meh
